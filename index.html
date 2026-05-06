@@ -419,6 +419,121 @@ button:focus-visible { outline: 2px solid var(--p1); outline-offset: 2px; }
   .mode-grid { grid-template-columns: repeat(5, 1fr); }
 }
 
+
+/* ══════════════════════════════════════════════════════
+   ONLINE OVERLAY
+   ══════════════════════════════════════════════════════ */
+#online-overlay {
+  position: fixed; inset: 0; z-index: 500;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(10, 14, 39, 0.92);
+  backdrop-filter: blur(8px);
+  animation: fadeIn 0.25s ease;
+}
+#online-overlay .online-box {
+  position: relative;
+  width: min(420px, 92vw);
+  padding: 32px 28px;
+  border: 1px solid rgba(0, 255, 255, 0.3);
+  border-radius: 8px;
+  background: rgba(13, 18, 48, 0.95);
+  box-shadow: 0 0 40px rgba(0, 255, 255, 0.15), inset 0 0 20px rgba(0, 255, 255, 0.05);
+  text-align: center;
+}
+#online-overlay .online-title {
+  font-family: var(--font-main); font-weight: 900;
+  font-size: 1.4rem; letter-spacing: 0.2em;
+  color: var(--p1); text-shadow: var(--glow1);
+  margin-bottom: 18px;
+}
+#online-overlay .online-section {
+  margin: 18px 0;
+  padding: 14px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+#online-overlay .online-section:first-of-type { border-top: none; padding-top: 0; }
+#online-overlay .online-label {
+  font-size: 0.65rem; letter-spacing: 0.2em;
+  color: var(--text-dim); margin-bottom: 8px;
+  font-family: var(--font-main);
+}
+#online-overlay input.room-input {
+  width: 100%; padding: 10px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--grid);
+  border-radius: 4px;
+  color: var(--p1);
+  font-family: var(--font-main); font-size: 1.1rem;
+  text-align: center; letter-spacing: 0.3em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+#online-overlay input.room-input:focus {
+  outline: none;
+  border-color: var(--p1);
+  box-shadow: 0 0 10px rgba(0, 255, 255, 0.3);
+}
+#online-overlay .online-btn {
+  width: 100%; padding: 12px;
+  border: 1px solid var(--p1); border-radius: 4px;
+  font-family: var(--font-main); font-size: 0.75rem;
+  letter-spacing: 0.2em; color: var(--p1);
+  background: rgba(0, 255, 255, 0.05);
+  transition: all var(--transition);
+  cursor: pointer;
+}
+#online-overlay .online-btn:hover {
+  background: rgba(0, 255, 255, 0.15);
+  box-shadow: var(--glow1);
+}
+#online-overlay .online-error {
+  color: var(--p2); font-size: 0.7rem;
+  margin-top: 10px; min-height: 1em;
+  text-shadow: var(--glow2);
+}
+#online-overlay .online-waiting {
+  margin-top: 16px; padding: 16px;
+  background: rgba(0, 255, 255, 0.05);
+  border: 1px solid rgba(0, 255, 255, 0.2);
+  border-radius: 4px;
+}
+#online-overlay .room-code {
+  font-family: var(--font-main); font-weight: 900;
+  font-size: 2rem; letter-spacing: 0.4em;
+  color: var(--p1); text-shadow: var(--glow1);
+  margin: 10px 0;
+}
+#online-overlay .waiting-text {
+  font-size: 0.65rem; color: var(--text-dim);
+  letter-spacing: 0.15em; animation: pulse 1.5s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 0.5; } 50% { opacity: 1; }
+}
+#online-overlay .close-btn {
+  position: absolute; top: 10px; right: 10px;
+  background: none; border: none; color: var(--text-dim);
+  font-size: 1.2rem; cursor: pointer; padding: 6px;
+}
+#online-overlay .close-btn:hover { color: var(--p1); }
+
+/* Online mode button in menu */
+.online-mode-btn {
+  margin-top: 12px;
+  padding: 10px 20px;
+  border: 1px solid var(--p2);
+  border-radius: 4px;
+  font-family: var(--font-main); font-size: 0.7rem;
+  letter-spacing: 0.2em; color: var(--p2);
+  background: rgba(255, 0, 110, 0.05);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.online-mode-btn:hover {
+  background: rgba(255, 0, 110, 0.15);
+  box-shadow: var(--glow2);
+}
+
 </style>
 </head>
 <body>
@@ -460,6 +575,7 @@ button:focus-visible { outline: 2px solid var(--p1); outline-offset: 2px; }
       </div>
     </div>
     <button class="play-btn" id="btn-play"><span class="play-btn-text">JOUER</span></button>
+    <button class="online-mode-btn" id="btn-online">&#x1F310; JOUER EN LIGNE</button>
     <div class="menu-bottom">
       <div class="best-score-display">
         <span class="bsd-label">MEILLEUR SCORE</span>
@@ -514,7 +630,229 @@ button:focus-visible { outline: 2px solid var(--p1); outline-offset: 2px; }
   </div>
 </div>
 
+<!-- ═══════ ONLINE OVERLAY ═══════ -->
+<div id="online-overlay" class="hidden">
+  <div class="online-box">
+    <button class="close-btn" id="btn-online-close">&times;</button>
+    <div class="online-title">JOUER EN LIGNE</div>
+
+    <div class="online-section">
+      <div class="online-label">CR&Eacute;ER UN SALON</div>
+      <button class="online-btn" id="btn-create-room">&#x2B50; CR&Eacute;ER</button>
+    </div>
+
+    <div class="online-section">
+      <div class="online-label">REJOINDRE UN SALON</div>
+      <input type="text" class="room-input" id="input-room-code" placeholder="CODE" maxlength="6"/>
+      <button class="online-btn" id="btn-join-room">&#x1F517; REJOINDRE</button>
+    </div>
+
+    <div class="online-error" id="online-error"></div>
+
+    <div class="online-waiting hidden" id="online-waiting">
+      <div class="online-label">CODE DU SALON</div>
+      <div class="room-code" id="online-code-display">------</div>
+      <div class="waiting-text">En attente d'un adversaire...</div>
+    </div>
+  </div>
+</div>
+
 <script>
+/* ═══════════════════════════════════════════════════
+   online.js — Firebase real-time multiplayer
+   ═══════════════════════════════════════════════════ */
+const Online = (() => {
+  // ⚠️ COLLE TA CONFIG FIREBASE ICI ⚠️
+  const FIREBASE_CONFIG = {
+    apiKey: "AIzaSyDj3Vhn7ZujbcJOAxgC3ba3W0B_GovyXZY",
+    authDomain: "pong-online-f6b1c.firebaseapp.com",
+    projectId: "pong-online-f6b1c",
+    storageBucket: "pong-online-f6b1c.firebasestorage.app",
+    messagingSenderId: "449909702334",
+    appId: "1:449909702334:web:e8edcb3529093e2676e8ef",
+    databaseURL: "https://pong-online-f6b1c-default-rtdb.europe-west1.firebasedatabase.app"
+  };
+
+  let app = null, db = null;
+  let role = null;        // 'host' or 'guest'
+  let roomCode = null;
+  let roomRef = null;
+  let unsubscribe = null;
+  let lastSentTime = 0;
+  let onRemoteUpdate = null;
+  let onConnected = null;
+  let onDisconnected = null;
+  let isReady = false;
+
+  /* ── Lazy-load Firebase from CDN ─────────────────── */
+  function loadFirebase() {
+    return new Promise((resolve, reject) => {
+      if (window.firebase) return resolve();
+      const s1 = document.createElement('script');
+      s1.src = 'https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js';
+      s1.onload = () => {
+        const s2 = document.createElement('script');
+        s2.src = 'https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js';
+        s2.onload = resolve;
+        s2.onerror = reject;
+        document.head.appendChild(s2);
+      };
+      s1.onerror = reject;
+      document.head.appendChild(s1);
+    });
+  }
+
+  async function init() {
+    if (isReady) return true;
+    if (FIREBASE_CONFIG.apiKey === "TON_API_KEY") {
+      console.error("Firebase config not set!");
+      return false;
+    }
+    try {
+      await loadFirebase();
+      app = firebase.initializeApp(FIREBASE_CONFIG);
+      db = firebase.database();
+      isReady = true;
+      return true;
+    } catch (e) {
+      console.error("Firebase init failed:", e);
+      return false;
+    }
+  }
+
+  /* ── Generate 6-char room code ──────────────────── */
+  function genCode() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code = '';
+    for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+    return code;
+  }
+
+  /* ── Create a room (host) ───────────────────────── */
+  async function createRoom() {
+    if (!await init()) return null;
+    roomCode = genCode();
+    role = 'host';
+    roomRef = db.ref('rooms/' + roomCode);
+
+    await roomRef.set({
+      created: Date.now(),
+      host: { y: 0.5, ready: true, score: 0 },
+      guest: null,
+      ball: { x: 0.5, y: 0.5, vx: 0, vy: 0 },
+      state: 'waiting',
+    });
+
+    // Auto-cleanup if disconnected
+    roomRef.onDisconnect().remove();
+
+    listenToRoom();
+    return roomCode;
+  }
+
+  /* ── Join a room (guest) ────────────────────────── */
+  async function joinRoom(code) {
+    if (!await init()) return false;
+    roomCode = code.toUpperCase();
+    role = 'guest';
+    roomRef = db.ref('rooms/' + roomCode);
+
+    const snapshot = await roomRef.once('value');
+    if (!snapshot.exists()) {
+      roomRef = null; roomCode = null; role = null;
+      return false;
+    }
+    const data = snapshot.val();
+    if (data.guest) {
+      roomRef = null; roomCode = null; role = null;
+      return false; // already full
+    }
+
+    await roomRef.child('guest').set({ y: 0.5, ready: true, score: 0 });
+    await roomRef.child('state').set('playing');
+
+    listenToRoom();
+    return true;
+  }
+
+  /* ── Listen for updates ─────────────────────────── */
+  function listenToRoom() {
+    if (!roomRef) return;
+    unsubscribe = roomRef.on('value', (snapshot) => {
+      const data = snapshot.val();
+      if (!data) {
+        if (onDisconnected) onDisconnected();
+        return;
+      }
+      if (data.state === 'playing' && data.host && data.guest) {
+        if (onConnected) { onConnected(); onConnected = null; }
+      }
+      if (onRemoteUpdate) onRemoteUpdate(data);
+    });
+  }
+
+  /* ── Send paddle position (called every frame, throttled) ───────────── */
+  function sendPaddleY(yNormalized) {
+    if (!roomRef || !role) return;
+    const now = Date.now();
+    if (now - lastSentTime < 30) return; // ~33fps throttle
+    lastSentTime = now;
+    roomRef.child(role + '/y').set(yNormalized);
+  }
+
+  /* ── Host sends ball state (only host owns physics) ─────────────────── */
+  function sendBallState(x, y, vx, vy) {
+    if (!roomRef || role !== 'host') return;
+    const now = Date.now();
+    if (now - lastSentTime < 50) return; // throttle 20fps
+    lastSentTime = now;
+    roomRef.child('ball').set({ x, y, vx, vy });
+  }
+
+  /* ── Host sends score ───────────────────────────── */
+  function sendScore(hostScore, guestScore) {
+    if (!roomRef || role !== 'host') return;
+    roomRef.update({
+      'host/score': hostScore,
+      'guest/score': guestScore,
+    });
+  }
+
+  /* ── Leave / cleanup ────────────────────────────── */
+  async function leave() {
+    if (roomRef) {
+      try {
+        if (role === 'host') {
+          await roomRef.remove();
+        } else if (role === 'guest') {
+          await roomRef.child('guest').remove();
+          await roomRef.child('state').set('waiting');
+        }
+      } catch(e) {}
+      try { roomRef.off(); } catch(e) {}
+    }
+    roomRef = null; roomCode = null; role = null;
+    onRemoteUpdate = null; onConnected = null;
+  }
+
+  /* ── Event setters ──────────────────────────────── */
+  function onUpdate(fn)      { onRemoteUpdate = fn; }
+  function onPeerConnect(fn) { onConnected    = fn; }
+  function onPeerLeave(fn)   { onDisconnected = fn; }
+
+  function getRole()      { return role; }
+  function getCode()      { return roomCode; }
+  function isInGame()     { return roomRef !== null; }
+  function isConfigured() { return FIREBASE_CONFIG.apiKey !== "TON_API_KEY"; }
+
+  return {
+    init, createRoom, joinRoom, leave,
+    sendPaddleY, sendBallState, sendScore,
+    onUpdate, onPeerConnect, onPeerLeave,
+    getRole, getCode, isInGame, isConfigured,
+  };
+})();
+
 /* ═══════════════════════════════════════════════════
    audio.js — Web Audio API synthetic sounds (safe)
    ═══════════════════════════════════════════════════ */
@@ -892,6 +1230,12 @@ const Ball = (() => {
     Effects.clearTrail();
   }
 
+  function _setRemote(rx, ry, rvx, rvy) {
+    // Smooth guest interpolation: blend toward authoritative state
+    x = x + (rx - x) * 0.3;
+    y = y + (ry - y) * 0.3;
+    vx = rvx; vy = rvy;
+  }
   function freeze()   { isFrozen = true;  }
   function unfreeze() { isFrozen = false; }
   function setPractice(v) { practiceMode = v; }
@@ -970,7 +1314,7 @@ const Ball = (() => {
   function getGlowPulse() { return glowPulse; }
 
   return {
-    reset, freeze, unfreeze, setPractice, update, collidePaddle, draw,
+    reset, freeze, unfreeze, setPractice, _setRemote, update, collidePaddle, draw,
     getRadius, getPos, getVel, getSpeed, getGlowPulse,
   };
 })();
@@ -1363,7 +1707,7 @@ document.addEventListener('DOMContentLoaded', function() {
   var currentTheme = THEMES['cyan-magenta'];
 
   /* ── State ───────────────────────────────────────── */
-  var MODES = { classic:11, quick:5, survival:999, local2p:11, practice:999 };
+  var MODES = { classic:11, quick:5, survival:999, local2p:11, practice:999, online:11 };
   var mode = 'classic', difficulty = 'medium';
   var gameRunning = false, paused = false;
   var scoreLeft = 0, scoreRight = 0;
@@ -1372,6 +1716,8 @@ document.addEventListener('DOMContentLoaded', function() {
   var comboCount = 0, maxRally = 0, currentRally = 0;
   var survivalRound = 0, lastScorer = 1;
   var animId = null;
+  var isOnline = false, isHost = false;
+  var remoteY = 0.5, remoteScore = 0;
   var paddleLeft = null, paddleRight = null;
 
   /* ── Paddle helpers ──────────────────────────────── */
@@ -1414,7 +1760,8 @@ document.addEventListener('DOMContentLoaded', function() {
     maxRally = Math.max(maxRally, currentRally);
     lastScorer = scorer === 'left' ? 1 : -1;
 
-    if (mode !== 'practice' && mode !== 'survival') UI.saveBestScore(scoreLeft, scoreRight);
+    if (mode !== 'practice' && mode !== 'survival' && mode !== 'online') UI.saveBestScore(scoreLeft, scoreRight);
+    if (mode === 'online' && isHost) Online.sendScore(scoreLeft, scoreRight);
     if (mode === 'survival' && scorer === 'right') {
       survivalRound++;
       if (survivalRound % 2 === 0) Paddle.shrink(paddleLeft);
@@ -1474,8 +1821,23 @@ document.addEventListener('DOMContentLoaded', function() {
 
       // Paddles
       Paddle.update(paddleLeft, dt, canvas.height, canvas);
-      if (mode === 'local2p') Paddle.update(paddleRight, dt, canvas.height, canvas);
+      if (mode === 'online') {
+        // Sync remote paddle smoothly
+        var targetY = remoteY * canvas.height - paddleRight.h / 2;
+        paddleRight.y += (targetY - paddleRight.y) * Math.min(1, dt * 18);
+        paddleRight.y = Math.max(0, Math.min(canvas.height - paddleRight.h, paddleRight.y));
+        // Send our paddle position
+        Online.sendPaddleY((paddleLeft.y + paddleLeft.h / 2) / canvas.height);
+      } else if (mode === 'local2p') Paddle.update(paddleRight, dt, canvas.height, canvas);
       else if (mode !== 'practice') AI.update(paddleRight, Ball, dt, canvas.height, ts);
+
+      // Online: only host runs ball physics, broadcasts state
+      if (mode === 'online') {
+        if (isHost) {
+          var bp = Ball.getPos(), bv = Ball.getVel();
+          Online.sendBallState(bp.x / canvas.width, bp.y / canvas.height, bv.vx, bv.vy);
+        }
+      }
 
       // Effects
       Effects.updateParticles(dt);
@@ -1631,6 +1993,88 @@ document.addEventListener('DOMContentLoaded', function() {
       document.getElementById('btn-play').click();
     }
   });
+
+
+  /* ── Online mode UI ──────────────────────────────────────────────────── */
+  var onlineOverlay = document.getElementById('online-overlay');
+  var onlineWaiting = document.getElementById('online-waiting');
+  var onlineCodeDisplay = document.getElementById('online-code-display');
+  var onlineError = document.getElementById('online-error');
+
+  document.getElementById('btn-online').addEventListener('click', function() {
+    if (!Online.isConfigured()) {
+      alert("Firebase n'est pas configuré. Édite online.js et colle ta config Firebase.");
+      return;
+    }
+    onlineOverlay.classList.remove('hidden');
+    onlineError.textContent = '';
+    onlineWaiting.classList.add('hidden');
+  });
+
+  document.getElementById('btn-online-close').addEventListener('click', function() {
+    onlineOverlay.classList.add('hidden');
+    Online.leave();
+  });
+
+  document.getElementById('btn-create-room').addEventListener('click', async function() {
+    onlineError.textContent = 'Connexion...';
+    var code = await Online.createRoom();
+    if (!code) { onlineError.textContent = 'Erreur de connexion'; return; }
+    onlineWaiting.classList.remove('hidden');
+    onlineCodeDisplay.textContent = code;
+    onlineError.textContent = '';
+    isHost = true; isOnline = true;
+    Online.onPeerConnect(function() {
+      onlineOverlay.classList.add('hidden');
+      startOnlineGame();
+    });
+    Online.onUpdate(function(data) {
+      if (!data) return;
+      if (data.guest) remoteY = data.guest.y;
+    });
+  });
+
+  document.getElementById('btn-join-room').addEventListener('click', async function() {
+    var code = document.getElementById('input-room-code').value.trim().toUpperCase();
+    if (code.length !== 6) { onlineError.textContent = 'Code invalide (6 caractères)'; return; }
+    onlineError.textContent = 'Connexion...';
+    var ok = await Online.joinRoom(code);
+    if (!ok) { onlineError.textContent = 'Salon introuvable ou complet'; return; }
+    isHost = false; isOnline = true;
+    onlineError.textContent = '';
+    onlineOverlay.classList.add('hidden');
+    Online.onUpdate(function(data) {
+      if (!data) return;
+      // Guest reads ball state from host
+      if (data.ball && !isHost) {
+        var bp = Ball.getPos();
+        // smooth update
+        bp.x = data.ball.x * canvas.width;
+        bp.y = data.ball.y * canvas.height;
+        Ball._setRemote && Ball._setRemote(bp.x, bp.y, data.ball.vx, data.ball.vy);
+      }
+      if (data.host) remoteY = data.host.y;
+      if (data.host && data.guest) {
+        scoreLeft = data.host.score || 0;
+        scoreRight = data.guest.score || 0;
+        UI.updateScore(scoreLeft, scoreRight);
+      }
+    });
+    startOnlineGame();
+  });
+
+  function startOnlineGame() {
+    startGame('online', 'medium');
+  }
+
+  // Cleanup online on menu return
+  var origGoMenu = goMenu;
+  goMenu = function() {
+    if (isOnline) { Online.leave(); isOnline = false; isHost = false; }
+    origGoMenu();
+  };
+  document.getElementById('btn-menu-from-pause').onclick = goMenu;
+  document.getElementById('btn-menu-from-end').onclick = goMenu;
 
 }); // DOMContentLoaded
 
