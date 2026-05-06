@@ -4,7 +4,7 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"/>
 <title>PONG — Retro Neon</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+CiAgPHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiBmaWxsPSIjMGEwZTI3IiByeD0iNCIvPgogIDwhLS0gUmFxdWV0dGUgLS0+CiAgPHJlY3QgeD0iNCIgeT0iOCIgd2lkdGg9IjQiIGhlaWdodD0iMTYiIHJ4PSIyIiBmaWxsPSIjMDBmZmZmIiBmaWx0ZXI9InVybCgjZzEpIi8+CiAgPCEtLSBCYWxsZSAtLT4KICA8Y2lyY2xlIGN4PSIyMCIgY3k9IjEzIiByPSI0IiBmaWxsPSIjZmZmZmZmIiBmaWx0ZXI9InVybCgjZzIpIi8+CiAgPCEtLSBMaWduZSBtw6lkaWFuZSAtLT4KICA8bGluZSB4MT0iMTYiIHkxPSIyIiB4Mj0iMTYiIHkyPSIzMCIgc3Ryb2tlPSIjMDBkNGZmIiBzdHJva2Utd2lkdGg9IjEiIHN0cm9rZS1kYXNoYXJyYXk9IjMsMyIgb3BhY2l0eT0iMC41Ii8+CiAgPGRlZnM+CiAgICA8ZmlsdGVyIGlkPSJnMSIgeD0iLTUwJSIgeT0iLTUwJSIgd2lkdGg9IjIwMCUiIGhlaWdodD0iMjAwJSI+CiAgICAgIDxmZUdhdXNzaWFuQmx1ciBzdGREZXZpYXRpb249IjEuNSIgcmVzdWx0PSJibHVyIi8+CiAgICAgIDxmZU1lcmdlPjxmZU1lcmdlTm9kZSBpbj0iYmx1ciIvPjxmZU1lcmdlTm9kZSBpbj0iU291cmNlR3JhcGhpYyIvPjwvZmVNZXJnZT4KICAgIDwvZmlsdGVyPgogICAgPGZpbHRlciBpZD0iZzIiIHg9Ii01MCUiIHk9Ii01MCUiIHdpZHRoPSIyMDAlIiBoZWlnaHQ9IjIwMCUiPgogICAgICA8ZmVHYXVzc2lhbkJsdXIgc3RkRGV2aWF0aW9uPSIyIiByZXN1bHQ9ImJsdXIiLz4KICAgICAgPGZlTWVyZ2U+PGZlTWVyZ2VOb2RlIGluPSJibHVyIi8+PGZlTWVyZ2VOb2RlIGluPSJTb3VyY2VHcmFwaGljIi8+PC9mZU1lcmdlPgogICAgPC9maWx0ZXI+CiAgPC9kZWZzPgo8L3N2Zz4="/>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+CiAgPHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiBmaWxsPSIjMGEwZTI3IiByeD0iNCIvPgogIDxyZWN0IHg9IjQiIHk9IjgiIHdpZHRoPSI0IiBoZWlnaHQ9IjE2IiByeD0iMiIgZmlsbD0iIzAwZmZmZiIgZmlsdGVyPSJ1cmwoI2cxKSIvPgogIDxjaXJjbGUgY3g9IjIwIiBjeT0iMTMiIHI9IjQiIGZpbGw9IiNmZmZmZmYiIGZpbHRlcj0idXJsKCNnMikiLz4KICA8bGluZSB4MT0iMTYiIHkxPSIyIiB4Mj0iMTYiIHkyPSIzMCIgc3Ryb2tlPSIjMDBkNGZmIiBzdHJva2Utd2lkdGg9IjEiIHN0cm9rZS1kYXNoYXJyYXk9IjMsMyIgb3BhY2l0eT0iMC41Ii8+CiAgPGRlZnM+CiAgICA8ZmlsdGVyIGlkPSJnMSIgeD0iLTUwJSIgeT0iLTUwJSIgd2lkdGg9IjIwMCUiIGhlaWdodD0iMjAwJSI+CiAgICAgIDxmZUdhdXNzaWFuQmx1ciBzdGREZXZpYXRpb249IjEuNSIgcmVzdWx0PSJibHVyIi8+CiAgICAgIDxmZU1lcmdlPjxmZU1lcmdlTm9kZSBpbj0iYmx1ciIvPjxmZU1lcmdlTm9kZSBpbj0iU291cmNlR3JhcGhpYyIvPjwvZmVNZXJnZT4KICAgIDwvZmlsdGVyPgogICAgPGZpbHRlciBpZD0iZzIiIHg9Ii01MCUiIHk9Ii01MCUiIHdpZHRoPSIyMDAlIiBoZWlnaHQ9IjIwMCUiPgogICAgICA8ZmVHYXVzc2lhbkJsdXIgc3RkRGV2aWF0aW9uPSIyIiByZXN1bHQ9ImJsdXIiLz4KICAgICAgPGZlTWVyZ2U+PGZlTWVyZ2VOb2RlIGluPSJibHVyIi8+PGZlTWVyZ2VOb2RlIGluPSJTb3VyY2VHcmFwaGljIi8+PC9mZU1lcmdlPgogICAgPC9maWx0ZXI+CiAgPC9kZWZzPgo8L3N2Zz4="/>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet"/>
 <style>
 /* ═══════════════════════════════════════════════════════
@@ -869,8 +869,8 @@ const Effects = (() => {
    ═══════════════════════════════════════════════════ */
 const Ball = (() => {
   const RADIUS = 7;
-  const BASE_SPEED = 420;
-  const MAX_SPEED = Infinity;
+  const BASE_SPEED = 500;
+  const MAX_SPEED = 1200;
   const ACCEL = 1.05;
 
   let x, y, vx, vy, speed;
@@ -902,7 +902,7 @@ const Ball = (() => {
       vy = (vy / len) * speed;
     }
     glowPulse = 1;
-    if (speed >= 700) Audio.accelerate();
+    if (speed >= 900) Audio.accelerate();
   }
 
   /* Returns 'right' if ball exits left wall (right scores),
