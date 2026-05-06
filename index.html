@@ -581,7 +581,7 @@ button:focus-visible { outline: 2px solid var(--p1); outline-offset: 2px; }
         <span class="bsd-label">MEILLEUR SCORE</span>
         <span class="bsd-val" id="menu-best-score">&mdash;</span>
       </div>
-      <div class="controls-hint">Z/S &bull; Joueur gauche &nbsp;|&nbsp; Fl&egrave;ches &bull; Joueur droit</div>
+      <div class="controls-hint">Z/S ou &#x2191;&#x2193; &bull; Joueur gauche &nbsp;|&nbsp; &#x2191;&#x2193; ou Z/S &bull; Joueur droit &nbsp;|&nbsp; 2P local : Z/S vs &#x2191;&#x2193;</div>
     </div>
   </div>
 </div>
@@ -635,20 +635,16 @@ button:focus-visible { outline: 2px solid var(--p1); outline-offset: 2px; }
   <div class="online-box">
     <button class="close-btn" id="btn-online-close">&times;</button>
     <div class="online-title">JOUER EN LIGNE</div>
-
     <div class="online-section">
       <div class="online-label">CR&Eacute;ER UN SALON</div>
       <button class="online-btn" id="btn-create-room">&#x2B50; CR&Eacute;ER</button>
     </div>
-
     <div class="online-section">
       <div class="online-label">REJOINDRE UN SALON</div>
       <input type="text" class="room-input" id="input-room-code" placeholder="CODE" maxlength="6"/>
       <button class="online-btn" id="btn-join-room">&#x1F517; REJOINDRE</button>
     </div>
-
     <div class="online-error" id="online-error"></div>
-
     <div class="online-waiting hidden" id="online-waiting">
       <div class="online-label">CODE DU SALON</div>
       <div class="room-code" id="online-code-display">------</div>
@@ -664,13 +660,13 @@ button:focus-visible { outline: 2px solid var(--p1); outline-offset: 2px; }
 const Online = (() => {
   // ⚠️ COLLE TA CONFIG FIREBASE ICI ⚠️
   const FIREBASE_CONFIG = {
-    apiKey: "AIzaSyDj3Vhn7ZujbcJOAxgC3ba3W0B_GovyXZY",
-    authDomain: "pong-online-f6b1c.firebaseapp.com",
-    projectId: "pong-online-f6b1c",
-    storageBucket: "pong-online-f6b1c.firebasestorage.app",
-    messagingSenderId: "449909702334",
-    appId: "1:449909702334:web:e8edcb3529093e2676e8ef",
-    databaseURL: "https://pong-online-f6b1c-default-rtdb.europe-west1.firebasedatabase.app"
+    apiKey: "TON_API_KEY",
+    authDomain: "TON_PROJET.firebaseapp.com",
+    projectId: "TON_PROJET",
+    storageBucket: "TON_PROJET.appspot.com",
+    messagingSenderId: "XXX",
+    appId: "XXX",
+    databaseURL: "https://TON_PROJET-default-rtdb.firebaseio.com"
   };
 
   let app = null, db = null;
@@ -1215,6 +1211,7 @@ const Ball = (() => {
   let glowPulse = 0;
   let isFrozen = false;
   let practiceMode = false;
+  let guestMode = false;
 
   function reset(cw, ch, direction) {
     direction = direction || 1;
@@ -1231,14 +1228,16 @@ const Ball = (() => {
   }
 
   function _setRemote(rx, ry, rvx, rvy) {
-    // Smooth guest interpolation: blend toward authoritative state
-    x = x + (rx - x) * 0.3;
-    y = y + (ry - y) * 0.3;
+    // Guest: directly set ball position from host — no local physics
+    x = rx; y = ry;
     vx = rvx; vy = rvy;
+    if (glowPulse > 0) glowPulse = Math.max(0, glowPulse - 0.016 * 3);
+    Effects.addTrailPoint(x, y);
   }
   function freeze()   { isFrozen = true;  }
   function unfreeze() { isFrozen = false; }
   function setPractice(v) { practiceMode = v; }
+  function setGuestMode(v) { guestMode = v; }
 
   function accelerate() {
     speed = Math.min(speed * ACCEL, MAX_SPEED);
@@ -1256,6 +1255,7 @@ const Ball = (() => {
              null    otherwise */
   function update(dt, cw, ch) {
     if (isFrozen) return null;
+    if (guestMode) return null; // guest: physics driven by host via _setRemote
 
     x += vx * dt;
     y += vy * dt;
@@ -1314,7 +1314,7 @@ const Ball = (() => {
   function getGlowPulse() { return glowPulse; }
 
   return {
-    reset, freeze, unfreeze, setPractice, _setRemote, update, collidePaddle, draw,
+    reset, freeze, unfreeze, setPractice, setGuestMode, _setRemote, update, collidePaddle, draw,
     getRadius, getPos, getVel, getSpeed, getGlowPulse,
   };
 })();
@@ -1373,22 +1373,26 @@ const Paddle = (() => {
     canvas.ontouchend = function() { touchStartY = null; touchCurrentY = null; };
   }
 
-  function update(paddle, dt, ch, canvas) {
+  function update(paddle, dt, ch, canvas, twoPlayerLocal) {
     let dy = 0;
     const scaleY = canvas ? canvas.height / canvas.clientHeight : 1;
 
     if (paddle.side === 'left') {
-      // Joueur 1 : Z/S ou W/S uniquement (pas les flèches)
-      if (keys['KeyW'] || keys['KeyZ']) dy -= SPEED * dt;
-      if (keys['KeyS'])                 dy += SPEED * dt;
+      // Joueur 1 : Z/S toujours + flèches sauf en 2P local
+      if (keys['KeyW'] || keys['KeyZ'])                          dy -= SPEED * dt;
+      if (keys['KeyS'])                                          dy += SPEED * dt;
+      if (!twoPlayerLocal && keys['ArrowUp'])                    dy -= SPEED * dt;
+      if (!twoPlayerLocal && keys['ArrowDown'])                  dy += SPEED * dt;
       if (touchIsLeft && touchStartY !== null && touchCurrentY !== null) {
         dy = (touchCurrentY - touchStartY) * scaleY;
         touchStartY = touchCurrentY;
       }
     } else {
-      // Joueur 2 : flèches uniquement
-      if (keys['ArrowUp'])   dy -= SPEED * dt;
-      if (keys['ArrowDown']) dy += SPEED * dt;
+      // Joueur 2 : flèches toujours + Z/S sauf en 2P local
+      if (keys['ArrowUp'])                                       dy -= SPEED * dt;
+      if (keys['ArrowDown'])                                     dy += SPEED * dt;
+      if (!twoPlayerLocal && (keys['KeyW'] || keys['KeyZ']))     dy -= SPEED * dt;
+      if (!twoPlayerLocal && keys['KeyS'])                       dy += SPEED * dt;
       if (!touchIsLeft && touchStartY !== null && touchCurrentY !== null) {
         dy = (touchCurrentY - touchStartY) * scaleY;
         touchStartY = touchCurrentY;
@@ -1819,6 +1823,22 @@ document.addEventListener('DOMContentLoaded', function() {
         if (comboCount >= 4) Audio.comboSound(comboCount);
       }
 
+      // Skip collisions for guest — host handles all physics
+      if (mode === 'online' && !isHost) {
+        Paddle.update(paddleLeft, dt, canvas.height, canvas);
+        var targetY2 = remoteY * canvas.height - paddleRight.h / 2;
+        paddleRight.y += (targetY2 - paddleRight.y) * Math.min(1, dt * 18);
+        paddleRight.y = Math.max(0, Math.min(canvas.height - paddleRight.h, paddleRight.y));
+        Online.sendPaddleY((paddleLeft.y + paddleLeft.h / 2) / canvas.height);
+        Effects.updateParticles(dt);
+        Effects.updateShake();
+        if (flashAlpha > 0) flashAlpha = Math.max(0, flashAlpha - dt * 2.5);
+        UI.setStatusInfo('&#x1F3D3; EN LIGNE');
+        draw(ts);
+        animId = requestAnimationFrame(loop);
+        return;
+      }
+
       // Paddles
       Paddle.update(paddleLeft, dt, canvas.height, canvas);
       if (mode === 'online') {
@@ -1882,6 +1902,7 @@ document.addEventListener('DOMContentLoaded', function() {
     createPaddles();
     Paddle.initInput(canvas);
     Ball.setPractice(mode === 'practice');
+    Ball.setGuestMode(mode === 'online' && !isHost);
     Ball.reset(canvas.width, canvas.height, 1);
 
     UI.updateScore(0, 0);
@@ -2047,11 +2068,12 @@ document.addEventListener('DOMContentLoaded', function() {
       if (!data) return;
       // Guest reads ball state from host
       if (data.ball && !isHost) {
-        var bp = Ball.getPos();
-        // smooth update
-        bp.x = data.ball.x * canvas.width;
-        bp.y = data.ball.y * canvas.height;
-        Ball._setRemote && Ball._setRemote(bp.x, bp.y, data.ball.vx, data.ball.vy);
+        Ball._setRemote(
+          data.ball.x * canvas.width,
+          data.ball.y * canvas.height,
+          data.ball.vx,
+          data.ball.vy
+        );
       }
       if (data.host) remoteY = data.host.y;
       if (data.host && data.guest) {
