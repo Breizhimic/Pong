@@ -537,7 +537,6 @@ button:focus-visible { outline: 2px solid var(--p1); outline-offset: 2px; }
 </style>
 </head>
 <body>
-
 <div id="screen-menu" class="screen active">
   <div class="menu-bg-grid"></div>
   <div class="scan-lines"></div>
@@ -585,7 +584,6 @@ button:focus-visible { outline: 2px solid var(--p1); outline-offset: 2px; }
     </div>
   </div>
 </div>
-
 <div id="screen-game" class="screen">
   <div class="scan-lines"></div>
   <div class="hud">
@@ -629,7 +627,6 @@ button:focus-visible { outline: 2px solid var(--p1); outline-offset: 2px; }
     </div>
   </div>
 </div>
-
 <div id="online-overlay" class="hidden">
   <div class="online-box">
     <button class="close-btn" id="btn-online-close">&times;</button>
@@ -651,7 +648,6 @@ button:focus-visible { outline: 2px solid var(--p1); outline-offset: 2px; }
     </div>
   </div>
 </div>
-
 <script>
 /* ═══════════════════════════════════════════════════
    online.js — Firebase real-time multiplayer
@@ -797,12 +793,12 @@ const Online = (() => {
   }
 
   /* ── Host sends ball state (only host owns physics) ─────────────────── */
-  function sendBallState(x, y, vx, vy) {
+  function sendBallState(x, y, vx, vy, frozen) {
     if (!roomRef || role !== 'host') return;
     const now = Date.now();
     if (now - lastBallSent < 50) return; // ~20fps for ball
     lastBallSent = now;
-    roomRef.child('ball').set({ x, y, vx, vy });
+    roomRef.child('ball').set({ x, y, vx, vy, frozen: frozen ? true : false });
   }
 
   /* ── Host sends score ───────────────────────────── */
@@ -812,6 +808,18 @@ const Online = (() => {
       'host/score': hostScore,
       'guest/score': guestScore,
     });
+  }
+
+  /* ── Host sends pause state ────────────────────── */
+  function sendBallReady() {
+    if (!roomRef || role !== 'host') return;
+    roomRef.child('ballReady').set(Date.now());
+  }
+
+  function sendPause(isPaused) {
+    if (!roomRef) return;
+    // Both host and guest can request pause
+    roomRef.child('paused').set(isPaused ? true : false);
   }
 
   /* ── Leave / cleanup ────────────────────────────── */
@@ -843,7 +851,7 @@ const Online = (() => {
 
   return {
     init, createRoom, joinRoom, leave,
-    sendPaddleY, sendBallState, sendScore,
+    sendPaddleY, sendBallState, sendScore, sendPause, sendBallReady,
     onUpdate, onPeerConnect, onPeerLeave,
     getRole, getCode, isInGame, isConfigured,
   };
@@ -1212,6 +1220,10 @@ const Ball = (() => {
   let isFrozen = false;
   let practiceMode = false;
   let guestMode = false;
+  let remoteX = 0, remoteY = 0, remoteVx = 0, remoteVy = 0;
+  let lastRemoteTime = 0;
+  let firstRemoteReceived = false;
+  let hasRemoteData = false; // true only after first Firebase update received
 
   function reset(cw, ch, direction) {
     direction = direction || 1;
@@ -1228,17 +1240,31 @@ const Ball = (() => {
   }
 
   function _setRemote(rx, ry, rvx, rvy) {
-    // Guest: host is authoritative — always accept position, even if frozen
     isFrozen = false;
-    x = rx; y = ry;
-    vx = rvx; vy = rvy;
+    if (!hasRemoteData) {
+      // Premier update : positionner la balle directement sans interpolation
+      x = rx; y = ry;
+      hasRemoteData = true;
+    }
+    remoteX = rx; remoteY = ry; remoteVx = rvx; remoteVy = rvy;
+    lastRemoteTime = Date.now();
     if (glowPulse > 0) glowPulse = Math.max(0, glowPulse - 0.016 * 3);
-    Effects.addTrailPoint(x, y);
   }
   function freeze()   { isFrozen = true;  }
   function unfreeze() { isFrozen = false; }
+  function getFrozen() { return isFrozen; }
+  function _teleport(rx, ry) {
+    // Téléportation pure : pas d'interpolation, pas de trail
+    x = rx; y = ry;
+    vx = 0; vy = 0;
+    Effects.clearTrail();
+    firstRemoteReceived = true;
+    lastRemoteTime = Date.now();
+    remoteX = rx; remoteY = ry; remoteVx = 0; remoteVy = 0;
+  }
   function setPractice(v) { practiceMode = v; }
   function setGuestMode(v) { guestMode = v; }
+  function resetFirstRemote() { firstRemoteReceived = false; Effects.clearTrail(); }
 
   function accelerate() {
     speed = Math.min(speed * ACCEL, MAX_SPEED);
@@ -1256,7 +1282,28 @@ const Ball = (() => {
              null    otherwise */
   function update(dt, cw, ch) {
     if (isFrozen) return null;
-    if (guestMode) return null; // guest: physics driven by host via _setRemote
+    
+    if (guestMode) {
+      if (!hasRemoteData) return null; // attendre le premier update Firebase
+      
+      const now = Date.now();
+      const timeSinceRemote = (now - lastRemoteTime) / 1000;
+      const t = Math.min(timeSinceRemote, 0.08);
+
+      // Extrapolation : prédire la position avec la vélocité du host
+      x += remoteVx * dt * 0.5;
+      y += remoteVy * dt * 0.5;
+
+      // Blend vers la position prédite côté host
+      const targetX = remoteX + remoteVx * t;
+      const targetY = remoteY + remoteVy * t;
+      x += (targetX - x) * 0.15;
+      y += (targetY - y) * 0.15;
+
+      vx = remoteVx; vy = remoteVy;
+      Effects.addTrailPoint(x, y);
+      return null;
+    }
 
     x += vx * dt;
     y += vy * dt;
@@ -1304,7 +1351,8 @@ const Ball = (() => {
   }
 
   function draw(ctx, color) {
-    Effects.drawTrail(ctx, color);   // uses stored trail points
+    if (guestMode && !hasRemoteData) return; // pas encore de données
+    Effects.drawTrail(ctx, color);
     Effects.drawGlowBall(ctx, x, y, RADIUS, color, 1 + glowPulse * 0.8);
   }
 
@@ -1315,7 +1363,7 @@ const Ball = (() => {
   function getGlowPulse() { return glowPulse; }
 
   return {
-    reset, freeze, unfreeze, setPractice, setGuestMode, _setRemote, update, collidePaddle, draw,
+    isFrozen: getFrozen, reset, freeze, unfreeze, setPractice, setGuestMode, resetFirstRemote, _setRemote, _teleport, update, collidePaddle, draw,
     getRadius, getPos, getVel, getSpeed, getGlowPulse,
   };
 })();
@@ -1574,10 +1622,13 @@ const UI = (() => {
   function updateHudTags(mode, diff, is2p) {
     const modeNames = {
       classic: 'CLASSIC', quick: 'QUICK',
-      survival: 'SURVIVAL', local2p: '2 JOUEURS', practice: 'PRACTICE',
+      survival: 'SURVIVAL', local2p: '2 JOUEURS',
+      practice: 'PRACTICE', online: 'EN LIGNE',
     };
     document.getElementById('hud-mode').textContent = modeNames[mode] || mode.toUpperCase();
-    if (is2p) {
+    if (mode === 'online') {
+      document.getElementById('hud-diff').textContent = 'P1 vs P2 • EN LIGNE';
+    } else if (is2p) {
       document.getElementById('hud-diff').textContent = 'P1 vs P2';
     } else if (mode === 'practice') {
       document.getElementById('hud-diff').textContent = 'ENTRAÎNEMENT';
@@ -1731,6 +1782,7 @@ document.addEventListener('DOMContentLoaded', function() {
   var animId = null;
   var isOnline = false, isHost = false;
   var remoteY = 0.5, remoteScore = 0;
+  var guestLastBallReady = 0;
   var paddleLeft = null, paddleRight = null;
 
   /* ── Paddle helpers ──────────────────────────────── */
@@ -1746,7 +1798,12 @@ document.addEventListener('DOMContentLoaded', function() {
     currentRally = 0;
     if (gameRunning) {
       Ball.freeze();
-      setTimeout(function() { if (gameRunning && !paused) Ball.unfreeze(); }, 800);
+      setTimeout(function() {
+        if (gameRunning && !paused) {
+          Ball.unfreeze();
+          if (mode === 'online' && isHost) Online.sendBallReady();
+        }
+      }, 800);
     }
   }
 
@@ -1864,7 +1921,7 @@ document.addEventListener('DOMContentLoaded', function() {
       // Online: only host runs ball physics, broadcasts state every frame
       if (mode === 'online' && isHost) {
         var bp = Ball.getPos(), bv = Ball.getVel();
-        Online.sendBallState(bp.x / canvas.width, bp.y / canvas.height, bv.vx, bv.vy);
+        Online.sendBallState(bp.x / canvas.width, bp.y / canvas.height, bv.vx, bv.vy, Ball.isFrozen());
       }
 
       // Effects
@@ -1926,7 +1983,12 @@ document.addEventListener('DOMContentLoaded', function() {
     gameRunning = true;
     paused = false;
     Ball.freeze();
-    setTimeout(function() { if (gameRunning && !paused) Ball.unfreeze(); }, 1000);
+    setTimeout(function() {
+      if (gameRunning && !paused) {
+        Ball.unfreeze();
+        if (mode === 'online' && isHost) Online.sendBallReady();
+      }
+    }, 1000);
     animId = requestAnimationFrame(loop);
   }
 
@@ -1993,12 +2055,14 @@ document.addEventListener('DOMContentLoaded', function() {
     if (!gameRunning) return;
     paused = !paused;
     UI.showPause(paused);
+    if (mode === 'online') Online.sendPause(paused);
     if (!paused) { lastTime = null; animId = requestAnimationFrame(loop); }
   }
 
   document.getElementById('btn-pause').addEventListener('click', togglePause);
   document.getElementById('btn-resume').addEventListener('click', function() {
     paused = false; UI.showPause(false);
+    if (mode === 'online') Online.sendPause(false);
     lastTime = null; animId = requestAnimationFrame(loop);
   });
   document.getElementById('btn-restart').addEventListener('click', function() {
@@ -2060,6 +2124,16 @@ document.addEventListener('DOMContentLoaded', function() {
     Online.onUpdate(function(data) {
       if (!data) return;
       if (data.guest) remoteY = data.guest.y;
+      // Host reçoit une demande de pause du guest
+      if (isHost && gameRunning) {
+        var remotePaused = data.paused === true;
+        if (remotePaused && !paused) {
+          paused = true; UI.showPause(true);
+        } else if (!remotePaused && paused) {
+          paused = false; UI.showPause(false);
+          lastTime = null; animId = requestAnimationFrame(loop);
+        }
+      }
     });
   });
 
@@ -2076,18 +2150,35 @@ document.addEventListener('DOMContentLoaded', function() {
       if (!data) return;
       // Guest reads ball state from host
       if (data.ball && !isHost) {
-        Ball._setRemote(
-          data.ball.x * canvas.width,
-          data.ball.y * canvas.height,
-          data.ball.vx,
-          data.ball.vy
-        );
+        var mirroredX = (1 - data.ball.x) * canvas.width;
+        var mirroredY = data.ball.y * canvas.height;
+        if (data.ball.frozen) {
+          // Balle gelée chez le host : téléportation instantanée, pas d'interpolation
+          Ball._teleport(mirroredX, mirroredY);
+        } else {
+          Ball._setRemote(mirroredX, mirroredY, -data.ball.vx, data.ball.vy);
+        }
+      }
+      // ballReady signal : host a unfreeZé, guest peut commencer
+      if (!isHost && data.ballReady && data.ballReady !== guestLastBallReady) {
+        guestLastBallReady = data.ballReady;
+        Ball.resetFirstRemote();
       }
       if (data.host) remoteY = data.host.y;
       if (data.host && data.guest) {
         scoreLeft = data.host.score || 0;
         scoreRight = data.guest.score || 0;
         UI.updateScore(scoreLeft, scoreRight);
+      }
+      // Sync pause depuis le host
+      if (!isHost && gameRunning) {
+        var hostPaused = data.paused === true;
+        if (hostPaused && !paused) {
+          paused = true; UI.showPause(true);
+        } else if (!hostPaused && paused) {
+          paused = false; UI.showPause(false);
+          lastTime = null; animId = requestAnimationFrame(loop);
+        }
       }
     });
     startOnlineGame();
