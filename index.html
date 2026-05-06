@@ -581,7 +581,7 @@ button:focus-visible { outline: 2px solid var(--p1); outline-offset: 2px; }
         <span class="bsd-label">MEILLEUR SCORE</span>
         <span class="bsd-val" id="menu-best-score">&mdash;</span>
       </div>
-      <div class="controls-hint">Z/S ou &#x2191;&#x2193; &bull; Joueur gauche &nbsp;|&nbsp; &#x2191;&#x2193; ou Z/S &bull; Joueur droit &nbsp;|&nbsp; 2P local : Z/S vs &#x2191;&#x2193;</div>
+      <div class="controls-hint">Z/S ou &#x2191;&#x2193; &bull; Joueur 1 &nbsp;|&nbsp; 2P local : Z/S vs &#x2191;&#x2193; exclusivement</div>
     </div>
   </div>
 </div>
@@ -630,7 +630,6 @@ button:focus-visible { outline: 2px solid var(--p1); outline-offset: 2px; }
   </div>
 </div>
 
-<!-- ═══════ ONLINE OVERLAY ═══════ -->
 <div id="online-overlay" class="hidden">
   <div class="online-box">
     <button class="close-btn" id="btn-online-close">&times;</button>
@@ -674,7 +673,8 @@ const Online = (() => {
   let roomCode = null;
   let roomRef = null;
   let unsubscribe = null;
-  let lastSentTime = 0;
+  let lastPaddleSent = 0;
+  let lastBallSent = 0;
   let onRemoteUpdate = null;
   let onConnected = null;
   let onDisconnected = null;
@@ -791,8 +791,8 @@ const Online = (() => {
   function sendPaddleY(yNormalized) {
     if (!roomRef || !role) return;
     const now = Date.now();
-    if (now - lastSentTime < 30) return; // ~33fps throttle
-    lastSentTime = now;
+    if (now - lastPaddleSent < 30) return; // ~33fps
+    lastPaddleSent = now;
     roomRef.child(role + '/y').set(yNormalized);
   }
 
@@ -800,8 +800,8 @@ const Online = (() => {
   function sendBallState(x, y, vx, vy) {
     if (!roomRef || role !== 'host') return;
     const now = Date.now();
-    if (now - lastSentTime < 50) return; // throttle 20fps
-    lastSentTime = now;
+    if (now - lastBallSent < 50) return; // ~20fps for ball
+    lastBallSent = now;
     roomRef.child('ball').set({ x, y, vx, vy });
   }
 
@@ -1228,7 +1228,8 @@ const Ball = (() => {
   }
 
   function _setRemote(rx, ry, rvx, rvy) {
-    // Guest: directly set ball position from host — no local physics
+    // Guest: host is authoritative — always accept position, even if frozen
+    isFrozen = false;
     x = rx; y = ry;
     vx = rvx; vy = rvy;
     if (glowPulse > 0) glowPulse = Math.max(0, glowPulse - 0.016 * 3);
@@ -1378,21 +1379,29 @@ const Paddle = (() => {
     const scaleY = canvas ? canvas.height / canvas.clientHeight : 1;
 
     if (paddle.side === 'left') {
-      // Joueur 1 : Z/S toujours + flèches sauf en 2P local
-      if (keys['KeyW'] || keys['KeyZ'])                          dy -= SPEED * dt;
-      if (keys['KeyS'])                                          dy += SPEED * dt;
-      if (!twoPlayerLocal && keys['ArrowUp'])                    dy -= SPEED * dt;
-      if (!twoPlayerLocal && keys['ArrowDown'])                  dy += SPEED * dt;
+      if (twoPlayerLocal) {
+        // 2P local : gauche = Z/S UNIQUEMENT
+        if (keys['KeyZ'] || keys['KeyW']) dy -= SPEED * dt;
+        if (keys['KeyS'])                 dy += SPEED * dt;
+      } else {
+        // Tous les autres modes : Z/S + flèches
+        if (keys['KeyZ'] || keys['KeyW'] || keys['ArrowUp'])   dy -= SPEED * dt;
+        if (keys['KeyS'] || keys['ArrowDown'])                  dy += SPEED * dt;
+      }
       if (touchIsLeft && touchStartY !== null && touchCurrentY !== null) {
         dy = (touchCurrentY - touchStartY) * scaleY;
         touchStartY = touchCurrentY;
       }
     } else {
-      // Joueur 2 : flèches toujours + Z/S sauf en 2P local
-      if (keys['ArrowUp'])                                       dy -= SPEED * dt;
-      if (keys['ArrowDown'])                                     dy += SPEED * dt;
-      if (!twoPlayerLocal && (keys['KeyW'] || keys['KeyZ']))     dy -= SPEED * dt;
-      if (!twoPlayerLocal && keys['KeyS'])                       dy += SPEED * dt;
+      if (twoPlayerLocal) {
+        // 2P local : droite = FLÈCHES UNIQUEMENT
+        if (keys['ArrowUp'])   dy -= SPEED * dt;
+        if (keys['ArrowDown']) dy += SPEED * dt;
+      } else {
+        // Tous les autres modes : flèches + Z/S
+        if (keys['ArrowUp']   || keys['KeyZ'] || keys['KeyW']) dy -= SPEED * dt;
+        if (keys['ArrowDown'] || keys['KeyS'])                  dy += SPEED * dt;
+      }
       if (!touchIsLeft && touchStartY !== null && touchCurrentY !== null) {
         dy = (touchCurrentY - touchStartY) * scaleY;
         touchStartY = touchCurrentY;
@@ -1840,7 +1849,8 @@ document.addEventListener('DOMContentLoaded', function() {
       }
 
       // Paddles
-      Paddle.update(paddleLeft, dt, canvas.height, canvas);
+      var is2p = (mode === 'local2p');
+      Paddle.update(paddleLeft,  dt, canvas.height, canvas, is2p);
       if (mode === 'online') {
         // Sync remote paddle smoothly
         var targetY = remoteY * canvas.height - paddleRight.h / 2;
@@ -1848,15 +1858,13 @@ document.addEventListener('DOMContentLoaded', function() {
         paddleRight.y = Math.max(0, Math.min(canvas.height - paddleRight.h, paddleRight.y));
         // Send our paddle position
         Online.sendPaddleY((paddleLeft.y + paddleLeft.h / 2) / canvas.height);
-      } else if (mode === 'local2p') Paddle.update(paddleRight, dt, canvas.height, canvas);
+      } else if (is2p) Paddle.update(paddleRight, dt, canvas.height, canvas, is2p);
       else if (mode !== 'practice') AI.update(paddleRight, Ball, dt, canvas.height, ts);
 
-      // Online: only host runs ball physics, broadcasts state
-      if (mode === 'online') {
-        if (isHost) {
-          var bp = Ball.getPos(), bv = Ball.getVel();
-          Online.sendBallState(bp.x / canvas.width, bp.y / canvas.height, bv.vx, bv.vy);
-        }
+      // Online: only host runs ball physics, broadcasts state every frame
+      if (mode === 'online' && isHost) {
+        var bp = Ball.getPos(), bv = Ball.getVel();
+        Online.sendBallState(bp.x / canvas.width, bp.y / canvas.height, bv.vx, bv.vy);
       }
 
       // Effects
