@@ -876,6 +876,7 @@ const Ball = (() => {
   let x, y, vx, vy, speed;
   let glowPulse = 0;
   let isFrozen = false;
+  let practiceMode = false;
 
   function reset(cw, ch, direction) {
     direction = direction || 1;
@@ -893,6 +894,7 @@ const Ball = (() => {
 
   function freeze()   { isFrozen = true;  }
   function unfreeze() { isFrozen = false; }
+  function setPractice(v) { practiceMode = v; }
 
   function accelerate() {
     speed = Math.min(speed * ACCEL, MAX_SPEED);
@@ -922,8 +924,16 @@ const Ball = (() => {
 
     Effects.addTrailPoint(x, y);
 
-    if (x - RADIUS < 0)  return 'right'; // left wall  → right player scores
-    if (x + RADIUS > cw) return 'left';  // right wall → left  player scores
+    if (x - RADIUS < 0) {
+      // Mur gauche : en practice rebondit, sinon point pour le droite
+      if (practiceMode) { x = RADIUS; vx = Math.abs(vx); Audio.wallHit(); Effects.spawnParticles(RADIUS, y, '#ffffff', 4); }
+      else return 'right';
+    }
+    if (x + RADIUS > cw) {
+      // Mur droit : en practice rebondit toujours
+      x = cw - RADIUS; vx = -Math.abs(vx); Audio.wallHit(); Effects.spawnParticles(cw - RADIUS, y, '#ffffff', 4);
+      if (!practiceMode) return 'left';
+    }
     return null;
   }
 
@@ -960,7 +970,7 @@ const Ball = (() => {
   function getGlowPulse() { return glowPulse; }
 
   return {
-    reset, freeze, unfreeze, update, collidePaddle, draw,
+    reset, freeze, unfreeze, setPractice, update, collidePaddle, draw,
     getRadius, getPos, getVel, getSpeed, getGlowPulse,
   };
 })();
@@ -1453,7 +1463,7 @@ document.addEventListener('DOMContentLoaded', function() {
         UI.showCombo(comboCount);
         if (comboCount >= 4) Audio.comboSound(comboCount);
       }
-      if (vel.vx > 0 && Paddle.checkBallCollision(paddleRight, pos.x, pos.y, br)) {
+      if (mode !== 'practice' && vel.vx > 0 && Paddle.checkBallCollision(paddleRight, pos.x, pos.y, br)) {
         Ball.collidePaddle(paddleRight, 'right');
         Paddle.onHit(paddleRight);
         currentRally++; comboCount++;
@@ -1491,7 +1501,7 @@ document.addEventListener('DOMContentLoaded', function() {
     Effects.drawParticles(ctx);
     Ball.draw(ctx, currentTheme.ball);
     Paddle.draw(paddleLeft, ctx);
-    Paddle.draw(paddleRight, ctx);
+    if (mode !== 'practice') Paddle.draw(paddleRight, ctx);
     Effects.drawFlash(ctx, canvas.width, canvas.height, flashColor, flashAlpha);
     ctx.restore();
   }
@@ -1509,6 +1519,7 @@ document.addEventListener('DOMContentLoaded', function() {
     resizeCanvas();
     createPaddles();
     Paddle.initInput(canvas);
+    Ball.setPractice(mode === 'practice');
     Ball.reset(canvas.width, canvas.height, 1);
 
     UI.updateScore(0, 0);
