@@ -650,69 +650,35 @@ button:focus-visible { outline: 2px solid var(--p1); outline-offset: 2px; }
 </div>
 <script>
 /* ═══════════════════════════════════════════════════
-   online.js — Firebase real-time multiplayer
+   online.js — PeerJS WebRTC P2P multiplayer
+   Remplace Firebase — latence 5-30ms directe
    ═══════════════════════════════════════════════════ */
 const Online = (() => {
-  // ⚠️ COLLE TA CONFIG FIREBASE ICI ⚠️
-  const FIREBASE_CONFIG = {
-    apiKey: "AIzaSyDj3Vhn7ZujbcJOAxgC3ba3W0B_GovyXZY",
-    authDomain: "pong-online-f6b1c.firebaseapp.com",
-    projectId: "pong-online-f6b1c",
-    storageBucket: "pong-online-f6b1c.firebasestorage.app",
-    messagingSenderId: "449909702334",
-    appId: "1:449909702334:web:e8edcb3529093e2676e8ef",
-    databaseURL: "https://pong-online-f6b1c-default-rtdb.europe-west1.firebasedatabase.app"
-  };
+  let peer = null;       // notre PeerJS instance
+  let conn = null;       // connexion DataChannel avec l'adversaire
+  let role = null;       // 'host' ou 'guest'
+  let roomCode = null;   // = peerID du host (6 chars)
 
-  let app = null, db = null;
-  let role = null;        // 'host' or 'guest'
-  let roomCode = null;
-  let roomRef = null;
-  let unsubscribe = null;
   let lastPaddleSent = 0;
-  let lastBallSent = 0;
-  let onRemoteUpdate = null;
-  let onConnected = null;
-  let onDisconnected = null;
-  let isReady = false;
+  let lastBallSent   = 0;
 
-  /* ── Lazy-load Firebase from CDN ─────────────────── */
-  function loadFirebase() {
+  let onRemoteUpdate  = null;
+  let onConnected     = null;
+  let onDisconnected  = null;
+
+  /* ── Lazy-load PeerJS depuis CDN ─────────────── */
+  function loadPeerJS() {
     return new Promise((resolve, reject) => {
-      if (window.firebase) return resolve();
-      const s1 = document.createElement('script');
-      s1.src = 'https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js';
-      s1.onload = () => {
-        const s2 = document.createElement('script');
-        s2.src = 'https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js';
-        s2.onload = resolve;
-        s2.onerror = reject;
-        document.head.appendChild(s2);
-      };
-      s1.onerror = reject;
-      document.head.appendChild(s1);
+      if (window.Peer) return resolve();
+      const s = document.createElement('script');
+      s.src = 'https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js';
+      s.onload = resolve;
+      s.onerror = reject;
+      document.head.appendChild(s);
     });
   }
 
-  async function init() {
-    if (isReady) return true;
-    if (FIREBASE_CONFIG.apiKey === "TON_API_KEY") {
-      console.error("Firebase config not set!");
-      return false;
-    }
-    try {
-      await loadFirebase();
-      app = firebase.initializeApp(FIREBASE_CONFIG);
-      db = firebase.database();
-      isReady = true;
-      return true;
-    } catch (e) {
-      console.error("Firebase init failed:", e);
-      return false;
-    }
-  }
-
-  /* ── Generate 6-char room code ──────────────────── */
+  /* ── Générer un code 6 chars lisible ─────────── */
   function genCode() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let code = '';
@@ -720,137 +686,182 @@ const Online = (() => {
     return code;
   }
 
-  /* ── Create a room (host) ───────────────────────── */
-  async function createRoom() {
-    if (!await init()) return null;
-    roomCode = genCode();
-    role = 'host';
-    roomRef = db.ref('rooms/' + roomCode);
-
-    await roomRef.set({
-      created: Date.now(),
-      host: { y: 0.5, ready: true, score: 0 },
-      guest: null,
-      ball: { x: 0.5, y: 0.5, vx: 0, vy: 0 },
-      state: 'waiting',
+  /* ── Init PeerJS avec un ID custom ───────────── */
+  function createPeerWithId(id) {
+    return new Promise((resolve, reject) => {
+      const p = new Peer(id, {
+        host: '0.peerjs.com',
+        port: 443,
+        secure: true,
+        path: '/',
+        debug: 0,
+        config: {
+          iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+          ]
+        }
+      });
+      p.on('open', () => resolve(p));
+      p.on('error', (e) => {
+        // ID déjà pris — réessayer avec un autre code
+        if (e.type === 'unavailable-id') {
+          p.destroy();
+          reject({ retry: true });
+        } else {
+          reject({ retry: false, error: e });
+        }
+      });
     });
-
-    // Auto-cleanup if disconnected
-    roomRef.onDisconnect().remove();
-
-    listenToRoom();
-    return roomCode;
   }
 
-  /* ── Join a room (guest) ────────────────────────── */
-  async function joinRoom(code) {
-    if (!await init()) return false;
-    roomCode = code.toUpperCase();
-    role = 'guest';
-    roomRef = db.ref('rooms/' + roomCode);
-
-    const snapshot = await roomRef.once('value');
-    if (!snapshot.exists()) {
-      roomRef = null; roomCode = null; role = null;
-      return false;
-    }
-    const data = snapshot.val();
-    if (data.guest) {
-      roomRef = null; roomCode = null; role = null;
-      return false; // already full
-    }
-
-    await roomRef.child('guest').set({ y: 0.5, ready: true, score: 0 });
-    await roomRef.child('state').set('playing');
-
-    listenToRoom();
-    return true;
-  }
-
-  /* ── Listen for updates ─────────────────────────── */
-  function listenToRoom() {
-    if (!roomRef) return;
-    unsubscribe = roomRef.on('value', (snapshot) => {
-      const data = snapshot.val();
-      if (!data) {
-        if (onDisconnected) onDisconnected();
-        return;
-      }
-      if (data.state === 'playing' && data.host && data.guest) {
-        if (onConnected) { onConnected(); onConnected = null; }
-      }
+  /* ── Wirer les événements d'une connexion ────── */
+  function wireConn(c) {
+    conn = c;
+    conn.on('open', () => {
+      if (onConnected) { onConnected(); onConnected = null; }
+    });
+    conn.on('data', (data) => {
       if (onRemoteUpdate) onRemoteUpdate(data);
     });
-  }
-
-  /* ── Send paddle position (called every frame, throttled) ───────────── */
-  function sendPaddleY(yNormalized) {
-    if (!roomRef || !role) return;
-    const now = Date.now();
-    if (now - lastPaddleSent < 30) return; // ~33fps
-    lastPaddleSent = now;
-    roomRef.child(role + '/y').set(yNormalized);
-  }
-
-  /* ── Host sends ball state (only host owns physics) ─────────────────── */
-  function sendBallState(x, y, vx, vy, frozen) {
-    if (!roomRef || role !== 'host') return;
-    const now = Date.now();
-    if (now - lastBallSent < 33) return; // ~30fps for ball
-    lastBallSent = now;
-    roomRef.child('ball').set({ x, y, vx, vy, frozen: frozen ? true : false });
-  }
-
-  /* ── Host sends score ───────────────────────────── */
-  function sendScore(hostScore, guestScore) {
-    if (!roomRef || role !== 'host') return;
-    roomRef.update({
-      'host/score': hostScore,
-      'guest/score': guestScore,
+    conn.on('close', () => {
+      conn = null;
+      if (onDisconnected) onDisconnected();
+    });
+    conn.on('error', (e) => {
+      console.error('PeerJS conn error:', e);
+      if (onDisconnected) onDisconnected();
     });
   }
 
-  /* ── Host sends pause state ────────────────────── */
-  function sendBallReady() {
-    if (!roomRef || role !== 'host') return;
-    roomRef.child('ballReady').set(Date.now());
-  }
-
-  function sendPause(isPaused) {
-    if (!roomRef) return;
-    // Both host and guest can request pause
-    roomRef.child('paused').set(isPaused ? true : false);
-  }
-
-  /* ── Leave / cleanup ────────────────────────────── */
-  async function leave() {
-    if (roomRef) {
+  /* ── Créer un salon (host) ────────────────────── */
+  async function createRoom() {
+    await loadPeerJS();
+    let attempts = 0;
+    while (attempts < 5) {
+      const code = genCode();
       try {
-        if (role === 'host') {
-          await roomRef.remove();
-        } else if (role === 'guest') {
-          await roomRef.child('guest').remove();
-          await roomRef.child('state').set('waiting');
-        }
-      } catch(e) {}
-      try { roomRef.off(); } catch(e) {}
+        peer = await createPeerWithId('pong-' + code);
+        roomCode = code;
+        role = 'host';
+        // Écouter les connexions entrantes
+        peer.on('connection', (c) => {
+          wireConn(c);
+        });
+        peer.on('error', (e) => {
+          console.error('PeerJS host error:', e);
+          if (onDisconnected) onDisconnected();
+        });
+        return code;
+      } catch(e) {
+        if (e.retry) { attempts++; continue; }
+        throw e.error;
+      }
     }
-    roomRef = null; roomCode = null; role = null;
+    throw new Error('Impossible de créer un salon');
+  }
+
+  /* ── Rejoindre un salon (guest) ──────────────── */
+  async function joinRoom(code) {
+    await loadPeerJS();
+    roomCode = code.toUpperCase();
+    role = 'guest';
+    return new Promise((resolve, reject) => {
+      peer = new Peer(undefined, {
+        host: '0.peerjs.com',
+        port: 443,
+        secure: true,
+        path: '/',
+        debug: 0,
+        config: {
+          iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+          ]
+        }
+      });
+      peer.on('open', () => {
+        const c = peer.connect('pong-' + roomCode, {
+          reliable: false,        // UDP-like : priorité vitesse sur fiabilité
+          serialization: 'json',
+        });
+        wireConn(c);
+        // Timeout si le host n'existe pas
+        const timeout = setTimeout(() => {
+          reject(new Error('Salon introuvable'));
+        }, 6000);
+        c.on('open', () => {
+          clearTimeout(timeout);
+          resolve(true);
+        });
+        c.on('error', (e) => {
+          clearTimeout(timeout);
+          reject(e);
+        });
+      });
+      peer.on('error', (e) => reject(e));
+    });
+  }
+
+  /* ── Envoi générique throttlé ─────────────────── */
+  function send(data) {
+    if (!conn || conn.open === false) return;
+    try { conn.send(data); } catch(e) {}
+  }
+
+  /* ── Paddle Y (host et guest) ─────────────────── */
+  function sendPaddleY(yNormalized) {
+    // Pas de throttle — envoyer à chaque frame pour paddle
+    send({ type: 'p', y: +yNormalized.toFixed(4) });
+  }
+
+  /* ── État balle (host uniquement) ────────────── */
+  function sendBallState(x, y, vx, vy, frozen) {
+    if (role !== 'host') return;
+    // Pas de throttle — balle envoyée à chaque frame
+    send({ type: 'b',
+      x: +x.toFixed(4), y: +y.toFixed(4),
+      vx: +vx.toFixed(2), vy: +vy.toFixed(2),
+      f: frozen ? 1 : 0 });
+  }
+
+  /* ── Score (host uniquement) ──────────────────── */
+  function sendScore(hostScore, guestScore) {
+    if (role !== 'host') return;
+    send({ type: 'score', host: hostScore, guest: guestScore });
+  }
+
+  /* ── Pause (les deux) ─────────────────────────── */
+  function sendPause(isPaused) {
+    send({ type: 'pause', paused: isPaused ? 1 : 0 });
+  }
+
+  /* ── ballReady (host uniquement) ─────────────── */
+  function sendBallReady() {
+    if (role !== 'host') return;
+    send({ type: 'ballReady', t: Date.now() });
+  }
+
+  /* ── Leave ────────────────────────────────────── */
+  async function leave() {
+    if (conn) { try { conn.close(); } catch(e) {} conn = null; }
+    if (peer) { try { peer.destroy(); } catch(e) {} peer = null; }
+    role = null; roomCode = null;
     onRemoteUpdate = null; onConnected = null;
   }
 
-  /* ── Event setters ──────────────────────────────── */
+  /* ── Setters événements ───────────────────────── */
   function onUpdate(fn)      { onRemoteUpdate = fn; }
   function onPeerConnect(fn) { onConnected    = fn; }
   function onPeerLeave(fn)   { onDisconnected = fn; }
 
   function getRole()      { return role; }
   function getCode()      { return roomCode; }
-  function isInGame()     { return roomRef !== null; }
-  function isConfigured() { return FIREBASE_CONFIG.apiKey !== "TON_API_KEY"; }
+  function isInGame()     { return conn !== null; }
+  function isConfigured() { return true; } // PeerJS ne nécessite pas de config
 
   return {
-    init, createRoom, joinRoom, leave,
+    createRoom, joinRoom, leave,
     sendPaddleY, sendBallState, sendScore, sendPause, sendBallReady,
     onUpdate, onPeerConnect, onPeerLeave,
     getRole, getCode, isInGame, isConfigured,
@@ -1288,23 +1299,28 @@ const Ball = (() => {
     if (isFrozen) return null;
 
     if (guestMode) {
-      if (!guestReady) return null; // wait for first host packet
+      if (!guestReady) return null;
 
-      const t = Math.min((Date.now() - lastRemoteTime) / 1000, 0.066);
-      const targetX = remoteX + remoteVx * t;
-      const targetY = remoteY + remoteVy * t;
-
-      const dx = targetX - x;
-      const dy = targetY - y;
-      const dist = Math.sqrt(dx*dx + dy*dy);
-      // Snap if very far (e.g. after a bounce correction), else smooth blend
-      if (dist > 120) {
-        x = targetX; y = targetY;
-      } else {
-        x += dx * 0.35;
-        y += dy * 0.35;
-      }
+      // Avancer la balle avec la vélocité reçue (extrapolation locale)
+      x += remoteVx * dt;
+      y += remoteVy * dt;
       vx = remoteVx; vy = remoteVy;
+
+      // Micro-correction vers la dernière position connue du host
+      // On ne blende que si on dérive trop (>15px) pour éviter le jitter
+      const dx = remoteX - x;
+      const dy = remoteY - y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > 120) {
+        // Trop loin : snap direct
+        x = remoteX; y = remoteY;
+      } else if (dist > 15) {
+        // Dérive légère : correction douce
+        x += dx * 0.12;
+        y += dy * 0.12;
+      }
+      // Si dist < 15px : ne rien faire, éviter le jitter visuel
+
       if (glowPulse > 0) glowPulse = Math.max(0, glowPulse - dt * 3);
       Effects.addTrailPoint(x, y);
       return null;
@@ -1898,7 +1914,7 @@ document.addEventListener('DOMContentLoaded', function() {
       if (mode === 'online' && !isHost) {
         Paddle.update(paddleLeft, dt, canvas.height, canvas);
         var targetY2 = remoteY * canvas.height - paddleRight.h / 2;
-        paddleRight.y += (targetY2 - paddleRight.y) * Math.min(1, dt * 18);
+        paddleRight.y += (targetY2 - paddleRight.y) * Math.min(1, dt * 25);
         paddleRight.y = Math.max(0, Math.min(canvas.height - paddleRight.h, paddleRight.y));
         Online.sendPaddleY((paddleLeft.y + paddleLeft.h / 2) / canvas.height);
         Effects.updateParticles(dt);
@@ -1916,7 +1932,7 @@ document.addEventListener('DOMContentLoaded', function() {
       if (mode === 'online') {
         // Sync remote paddle smoothly
         var targetY = remoteY * canvas.height - paddleRight.h / 2;
-        paddleRight.y += (targetY - paddleRight.y) * Math.min(1, dt * 18);
+        paddleRight.y += (targetY - paddleRight.y) * Math.min(1, dt * 25);
         paddleRight.y = Math.max(0, Math.min(canvas.height - paddleRight.h, paddleRight.y));
         // Send our paddle position
         Online.sendPaddleY((paddleLeft.y + paddleLeft.h / 2) / canvas.height);
@@ -2126,15 +2142,14 @@ document.addEventListener('DOMContentLoaded', function() {
       onlineOverlay.classList.add('hidden');
       startOnlineGame();
     });
-    Online.onUpdate(function(data) {
-      if (!data) return;
-      if (data.guest) remoteY = data.guest.y;
-      // Host reçoit une demande de pause du guest
-      if (isHost && gameRunning) {
-        var remotePaused = data.paused === true;
-        if (remotePaused && !paused) {
+    Online.onUpdate(function(msg) {
+      if (!msg) return;
+      if (msg.type === 'p') remoteY = msg.y;
+      if (msg.type === 'pause' && gameRunning) {
+        var wantPause = msg.paused === 1;
+        if (wantPause && !paused) {
           paused = true; UI.showPause(true);
-        } else if (!remotePaused && paused) {
+        } else if (!wantPause && paused) {
           paused = false; UI.showPause(false);
           lastTime = null; animId = requestAnimationFrame(loop);
         }
@@ -2151,40 +2166,28 @@ document.addEventListener('DOMContentLoaded', function() {
     isHost = false; isOnline = true;
     onlineError.textContent = '';
     onlineOverlay.classList.add('hidden');
-    Online.onUpdate(function(data) {
-      if (!data) return;
-      // Guest reads ball state from host
-      if (data.ball && !isHost) {
-        var mirroredX = (1 - data.ball.x) * canvas.width;
-        var mirroredY = data.ball.y * canvas.height;
-        if (data.ball.frozen) {
-          // Balle gelée chez le host : téléportation instantanée, pas d'interpolation
-          Ball._teleport(mirroredX, mirroredY);
-        } else {
-          Ball._setRemote(mirroredX, mirroredY, -data.ball.vx, data.ball.vy);
-        }
+    Online.onUpdate(function(msg) {
+      if (!msg) return;
+      if (msg.type === 'b') {
+        var mx = (1 - msg.x) * canvas.width;
+        var my = msg.y * canvas.height;
+        if (msg.f) { Ball._teleport(mx, my); }
+        else        { Ball._setRemote(mx, my, -msg.vx, msg.vy); }
       }
-      // ballReady signal : host a unfreeZé, guest peut commencer
-      if (!isHost && data.ballReady && data.ballReady !== guestLastBallReady) {
-        guestLastBallReady = data.ballReady;
-        Ball.resetFirstRemote();
-      }
-      if (data.host) remoteY = data.host.y;
-      if (data.host && data.guest) {
-        // Guest est à droite : son score est à gauche, le host à droite (miroir)
-        scoreLeft  = data.guest.score || 0;
-        scoreRight = data.host.score  || 0;
+      if (msg.type === 'p') remoteY = msg.y;
+      if (msg.type === 'score') {
+        scoreLeft  = msg.guest || 0;
+        scoreRight = msg.host  || 0;
         UI.updateScore(scoreLeft, scoreRight);
       }
-      // Sync pause depuis le host
-      if (!isHost && gameRunning) {
-        var hostPaused = data.paused === true;
-        if (hostPaused && !paused) {
-          paused = true; UI.showPause(true);
-        } else if (!hostPaused && paused) {
-          paused = false; UI.showPause(false);
-          lastTime = null; animId = requestAnimationFrame(loop);
-        }
+      if (msg.type === 'pause' && gameRunning) {
+        var wp = msg.paused === 1;
+        if (wp && !paused)  { paused = true;  UI.showPause(true); }
+        if (!wp && paused)  { paused = false; UI.showPause(false); lastTime = null; animId = requestAnimationFrame(loop); }
+      }
+      if (msg.type === 'ballReady' && msg.t !== guestLastBallReady) {
+        guestLastBallReady = msg.t;
+        Ball.resetFirstRemote();
       }
     });
     startOnlineGame();
