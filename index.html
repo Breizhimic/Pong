@@ -1210,28 +1210,30 @@ const Effects = (() => {
    ball.js — Ball physics
    ═══════════════════════════════════════════════════ */
 const Ball = (() => {
-  const RADIUS = 7;
+  const RADIUS   = 7;
   const BASE_SPEED = 500;
-  const MAX_SPEED = 1200;
-  const ACCEL = 1.05;
+  const MAX_SPEED  = 1200;
+  const ACCEL    = 1.05;
 
   let x, y, vx, vy, speed;
-  let glowPulse = 0;
-  let isFrozen = false;
+  let glowPulse  = 0;
+  let isFrozen   = false;
   let practiceMode = false;
-  let guestMode = false;
+
+  /* ── Guest mode vars ──────────────────────────── */
+  let guestMode  = false;
   let remoteX = 0, remoteY = 0, remoteVx = 0, remoteVy = 0;
   let lastRemoteTime = 0;
-  let firstRemoteReceived = false;
-  let hasRemoteData = false; // true only after first Firebase update received
+  let guestReady = false; // true after first valid Firebase packet
 
+  /* ── Reset ────────────────────────────────────── */
   function reset(cw, ch, direction) {
     direction = direction || 1;
-    x = cw / 2;
-    y = ch / 2;
-    speed = BASE_SPEED;
+    x = cw / 2; y = ch / 2;
+    speed  = BASE_SPEED;
     isFrozen = false;
     glowPulse = 0;
+    guestReady = false; // always wait for fresh host data after each reset
     const angle = (20 + Math.random() * 30) * (Math.PI / 180);
     const vert  = Math.random() < 0.5 ? 1 : -1;
     vx = direction * Math.cos(angle) * speed;
@@ -1239,106 +1241,105 @@ const Ball = (() => {
     Effects.clearTrail();
   }
 
+  /* ── Guest: receive authoritative state from host ─ */
   function _setRemote(rx, ry, rvx, rvy) {
     isFrozen = false;
-    if (!hasRemoteData) {
-      // Premier update : positionner la balle directement sans interpolation
+    if (!guestReady) {
+      // First packet after reset: snap directly, no interpolation
       x = rx; y = ry;
-      hasRemoteData = true;
+      guestReady = true;
+      Effects.clearTrail();
     }
-    remoteX = rx; remoteY = ry; remoteVx = rvx; remoteVy = rvy;
+    remoteX = rx; remoteY = ry;
+    remoteVx = rvx; remoteVy = rvy;
     lastRemoteTime = Date.now();
     if (glowPulse > 0) glowPulse = Math.max(0, glowPulse - 0.016 * 3);
   }
-  function freeze()   { isFrozen = true;  }
-  function unfreeze() { isFrozen = false; }
-  function getFrozen() { return isFrozen; }
+
+  /* ── Guest: teleport (when host ball is frozen) ── */
   function _teleport(rx, ry) {
-    // Téléportation pure : pas d'interpolation, pas de trail
     x = rx; y = ry;
     vx = 0; vy = 0;
-    Effects.clearTrail();
-    firstRemoteReceived = true;
-    lastRemoteTime = Date.now();
     remoteX = rx; remoteY = ry; remoteVx = 0; remoteVy = 0;
+    lastRemoteTime = Date.now();
+    guestReady = false; // next unfreeze will snap again
+    Effects.clearTrail();
   }
-  function setPractice(v) { practiceMode = v; }
-  function setGuestMode(v) { guestMode = v; }
-  function resetFirstRemote() { firstRemoteReceived = false; Effects.clearTrail(); }
 
+  function freeze()   { isFrozen = true;  }
+  function unfreeze() { isFrozen = false; }
+  function getFrozen(){ return isFrozen; }
+
+  function setPractice(v) { practiceMode = v; }
+  function setGuestMode(v) { guestMode = v; if (!v) { guestReady = false; } }
+  function resetFirstRemote() { guestReady = false; Effects.clearTrail(); }
+
+  /* ── Accelerate ───────────────────────────────── */
   function accelerate() {
     speed = Math.min(speed * ACCEL, MAX_SPEED);
     const len = Math.sqrt(vx * vx + vy * vy);
-    if (len > 0) {
-      vx = (vx / len) * speed;
-      vy = (vy / len) * speed;
-    }
+    if (len > 0) { vx = (vx / len) * speed; vy = (vy / len) * speed; }
     glowPulse = 1;
     if (speed >= 900) Audio.accelerate();
   }
 
-  /* Returns 'right' if ball exits left wall (right scores),
-             'left'  if ball exits right wall (left scores),
-             null    otherwise */
+  /* ── Update ───────────────────────────────────── */
   function update(dt, cw, ch) {
     if (isFrozen) return null;
-    
+
     if (guestMode) {
-      if (!firstRemoteReceived) return null;
+      if (!guestReady) return null; // wait for first host packet
 
-      const now = Date.now();
-      const t = Math.min((now - lastRemoteTime) / 1000, 0.066);
-
+      const t = Math.min((Date.now() - lastRemoteTime) / 1000, 0.066);
       const targetX = remoteX + remoteVx * t;
       const targetY = remoteY + remoteVy * t;
 
       const dx = targetX - x;
       const dy = targetY - y;
       const dist = Math.sqrt(dx*dx + dy*dy);
-      const blend = dist > 80 ? 0.5 : 0.35;
-
-      x += dx * blend;
-      y += dy * blend;
+      // Snap if very far (e.g. after a bounce correction), else smooth blend
+      if (dist > 120) {
+        x = targetX; y = targetY;
+      } else {
+        x += dx * 0.35;
+        y += dy * 0.35;
+      }
       vx = remoteVx; vy = remoteVy;
-
+      if (glowPulse > 0) glowPulse = Math.max(0, glowPulse - dt * 3);
       Effects.addTrailPoint(x, y);
       return null;
     }
 
     x += vx * dt;
     y += vy * dt;
-
     if (glowPulse > 0) glowPulse = Math.max(0, glowPulse - dt * 3);
 
     // Top / bottom walls
     if (y - RADIUS <= 0)  { y = RADIUS;       vy =  Math.abs(vy); Audio.wallHit(); Effects.spawnParticles(x, RADIUS,      '#ffffff', 4); }
     if (y + RADIUS >= ch) { y = ch - RADIUS;  vy = -Math.abs(vy); Audio.wallHit(); Effects.spawnParticles(x, ch - RADIUS, '#ffffff', 4); }
 
-    Effects.addTrailPoint(x, y);
+    if (practiceMode) {
+      if (x - RADIUS <= 0)  { x = RADIUS;      vx =  Math.abs(vx); Audio.wallHit(); Effects.spawnParticles(RADIUS,      y, '#ffffff', 4); }
+      if (x + RADIUS >= cw) { x = cw - RADIUS; vx = -Math.abs(vx); Audio.wallHit(); Effects.spawnParticles(cw - RADIUS, y, '#ffffff', 4); }
+    } else {
+      if (x - RADIUS < 0)  return 'right';
+      if (x + RADIUS > cw) return 'left';
+    }
 
-    if (x - RADIUS < 0) {
-      // Mur gauche : en practice rebondit, sinon point pour le droite
-      if (practiceMode) { x = RADIUS; vx = Math.abs(vx); Audio.wallHit(); Effects.spawnParticles(RADIUS, y, '#ffffff', 4); }
-      else return 'right';
-    }
-    if (x + RADIUS > cw) {
-      // Mur droit : en practice rebondit toujours
-      x = cw - RADIUS; vx = -Math.abs(vx); Audio.wallHit(); Effects.spawnParticles(cw - RADIUS, y, '#ffffff', 4);
-      if (!practiceMode) return 'left';
-    }
+    Effects.addTrailPoint(x, y);
     return null;
   }
 
+  /* ── Paddle collision ─────────────────────────── */
   function collidePaddle(paddle, side) {
-    const relative  = ((y - paddle.y) / paddle.h) * 2 - 1; // -1 to 1
-    const maxAngle  = 65 * (Math.PI / 180);
-    const angle     = relative * maxAngle;
-    const dir       = side === 'left' ? 1 : -1;
+    const relative = ((y - paddle.y) / paddle.h) * 2 - 1;
+    const maxAngle = 65 * (Math.PI / 180);
+    const angle    = relative * maxAngle;
+    const dir      = side === 'left' ? 1 : -1;
 
     vx = dir * Math.cos(angle) * speed;
     vy = Math.sin(angle) * speed;
 
-    // Push ball clear of paddle
     if (side === 'left') x = paddle.x + paddle.w + RADIUS + 1;
     else                 x = paddle.x - RADIUS - 1;
 
@@ -1350,8 +1351,8 @@ const Ball = (() => {
     else                 Audio.paddleHitRight();
   }
 
+  /* ── Draw ─────────────────────────────────────── */
   function draw(ctx, color) {
-    if (guestMode && !hasRemoteData) return; // pas encore de données
     Effects.drawTrail(ctx, color);
     Effects.drawGlowBall(ctx, x, y, RADIUS, color, 1 + glowPulse * 0.8);
   }
@@ -1363,7 +1364,11 @@ const Ball = (() => {
   function getGlowPulse() { return glowPulse; }
 
   return {
-    isFrozen: getFrozen, reset, freeze, unfreeze, setPractice, setGuestMode, resetFirstRemote, _setRemote, _teleport, update, collidePaddle, draw,
+    isFrozen: getFrozen,
+    reset, freeze, unfreeze,
+    setPractice, setGuestMode, resetFirstRemote,
+    _setRemote, _teleport,
+    update, collidePaddle, draw,
     getRadius, getPos, getVel, getSpeed, getGlowPulse,
   };
 })();
