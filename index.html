@@ -796,7 +796,7 @@ const Online = (() => {
   function sendBallState(x, y, vx, vy, frozen) {
     if (!roomRef || role !== 'host') return;
     const now = Date.now();
-    if (now - lastBallSent < 50) return; // ~20fps for ball
+    if (now - lastBallSent < 33) return; // ~30fps for ball
     lastBallSent = now;
     roomRef.child('ball').set({ x, y, vx, vy, frozen: frozen ? true : false });
   }
@@ -1284,23 +1284,23 @@ const Ball = (() => {
     if (isFrozen) return null;
     
     if (guestMode) {
-      if (!hasRemoteData) return null; // attendre le premier update Firebase
-      
+      if (!firstRemoteReceived) return null;
+
       const now = Date.now();
-      const timeSinceRemote = (now - lastRemoteTime) / 1000;
-      const t = Math.min(timeSinceRemote, 0.08);
+      const t = Math.min((now - lastRemoteTime) / 1000, 0.066);
 
-      // Extrapolation : prédire la position avec la vélocité du host
-      x += remoteVx * dt * 0.5;
-      y += remoteVy * dt * 0.5;
-
-      // Blend vers la position prédite côté host
       const targetX = remoteX + remoteVx * t;
       const targetY = remoteY + remoteVy * t;
-      x += (targetX - x) * 0.15;
-      y += (targetY - y) * 0.15;
 
+      const dx = targetX - x;
+      const dy = targetY - y;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      const blend = dist > 80 ? 0.5 : 0.35;
+
+      x += dx * blend;
+      y += dy * blend;
       vx = remoteVx; vy = remoteVy;
+
       Effects.addTrailPoint(x, y);
       return null;
     }
@@ -2166,8 +2166,9 @@ document.addEventListener('DOMContentLoaded', function() {
       }
       if (data.host) remoteY = data.host.y;
       if (data.host && data.guest) {
-        scoreLeft = data.host.score || 0;
-        scoreRight = data.guest.score || 0;
+        // Guest est à droite : son score est à gauche, le host à droite (miroir)
+        scoreLeft  = data.guest.score || 0;
+        scoreRight = data.host.score  || 0;
         UI.updateScore(scoreLeft, scoreRight);
       }
       // Sync pause depuis le host
