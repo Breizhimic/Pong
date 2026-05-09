@@ -534,6 +534,30 @@ button:focus-visible { outline: 2px solid var(--p1); outline-offset: 2px; }
   box-shadow: var(--glow2);
 }
 
+/* ── Paddle speed slider ─────────────────────────── */
+.speed-row {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 6px;
+}
+.speed-slider {
+  -webkit-appearance: none; appearance: none;
+  flex: 1; height: 4px; border-radius: 2px;
+  background: linear-gradient(to right, var(--p1), var(--p2));
+  outline: none; cursor: pointer;
+}
+.speed-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--p1); box-shadow: var(--glow1);
+  cursor: pointer;
+}
+.speed-label {
+  font-family: var(--font-main); font-size: 0.65rem;
+  letter-spacing: 0.15em; color: var(--p1);
+  min-width: 70px; text-align: right;
+  text-shadow: var(--glow1);
+}
+
 </style>
 </head>
 <body>
@@ -562,6 +586,14 @@ button:focus-visible { outline: 2px solid var(--p1); outline-offset: 2px; }
         <button class="diff-btn" data-diff="easy">EASY</button>
         <button class="diff-btn active" data-diff="medium">MEDIUM</button>
         <button class="diff-btn" data-diff="hard">HARD</button>
+      </div>
+    </div>
+    <div class="menu-section">
+      <div class="section-label">VITESSE PADDLE</div>
+      <div class="speed-row">
+        <input type="range" class="speed-slider" id="paddle-speed-slider"
+               min="0.5" max="2.0" step="0.25" value="1.0"/>
+        <span class="speed-label" id="paddle-speed-label">NORMAL</span>
       </div>
     </div>
     <div class="menu-section">
@@ -836,6 +868,12 @@ const Online = (() => {
     send({ type: 'pause', paused: isPaused ? 1 : 0 });
   }
 
+  /* ── End game (host uniquement) ──────────────── */
+  function sendEnd(winSide, hostScore, guestScore) {
+    if (role !== 'host') return;
+    send({ type: 'end', winSide, host: hostScore, guest: guestScore });
+  }
+
   /* ── ballReady (host uniquement) ─────────────── */
   function sendBallReady() {
     if (role !== 'host') return;
@@ -862,7 +900,7 @@ const Online = (() => {
 
   return {
     createRoom, joinRoom, leave,
-    sendPaddleY, sendBallState, sendScore, sendPause, sendBallReady,
+    sendPaddleY, sendBallState, sendScore, sendPause, sendBallReady, sendEnd,
     onUpdate, onPeerConnect, onPeerLeave,
     getRole, getCode, isInGame, isConfigured,
   };
@@ -1255,11 +1293,12 @@ const Ball = (() => {
   /* ── Guest: receive authoritative state from host ─ */
   function _setRemote(rx, ry, rvx, rvy) {
     isFrozen = false;
-    if (!guestReady) {
-      // First packet after reset: snap directly, no interpolation
+    // Si la direction X a changé (rebond mur/paddle) : snap direct
+    const dirChanged = (remoteVx !== 0) && (Math.sign(rvx) !== Math.sign(remoteVx));
+    if (!guestReady || dirChanged) {
       x = rx; y = ry;
       guestReady = true;
-      Effects.clearTrail();
+      if (dirChanged) Effects.clearTrail();
     }
     remoteX = rx; remoteY = ry;
     remoteVx = rvx; remoteVy = rvy;
@@ -1443,19 +1482,21 @@ const Paddle = (() => {
     canvas.ontouchend = function() { touchStartY = null; touchCurrentY = null; };
   }
 
-  function update(paddle, dt, ch, canvas, twoPlayerLocal) {
+  function update(paddle, dt, ch, canvas, twoPlayerLocal, speedFactor) {
+    speedFactor = speedFactor || 1.0;
+    var S = SPEED * speedFactor;
     let dy = 0;
     const scaleY = canvas ? canvas.height / canvas.clientHeight : 1;
 
     if (paddle.side === 'left') {
       if (twoPlayerLocal) {
         // 2P local : gauche = Z/S UNIQUEMENT
-        if (keys['KeyZ'] || keys['KeyW']) dy -= SPEED * dt;
-        if (keys['KeyS'])                 dy += SPEED * dt;
+        if (keys['KeyZ'] || keys['KeyW']) dy -= S * dt;
+        if (keys['KeyS'])                 dy += S * dt;
       } else {
         // Tous les autres modes : Z/S + flèches
-        if (keys['KeyZ'] || keys['KeyW'] || keys['ArrowUp'])   dy -= SPEED * dt;
-        if (keys['KeyS'] || keys['ArrowDown'])                  dy += SPEED * dt;
+        if (keys['KeyZ'] || keys['KeyW'] || keys['ArrowUp'])   dy -= S * dt;
+        if (keys['KeyS'] || keys['ArrowDown'])                  dy += S * dt;
       }
       if (touchIsLeft && touchStartY !== null && touchCurrentY !== null) {
         dy = (touchCurrentY - touchStartY) * scaleY;
@@ -1804,6 +1845,7 @@ document.addEventListener('DOMContentLoaded', function() {
   var isOnline = false, isHost = false;
   var remoteY = 0.5, remoteScore = 0;
   var guestLastBallReady = 0;
+  var paddleSpeedFactor = 1.0; // 0.5 = lent, 1.0 = normal, 2.0 = rapide
   var paddleLeft = null, paddleRight = null;
 
   /* ── Paddle helpers ──────────────────────────────── */
@@ -1871,6 +1913,10 @@ document.addEventListener('DOMContentLoaded', function() {
     if (winSide === 'left') Audio.victory(); else Audio.defeat();
     UI.saveStats(winSide === 'left');
     UI.showEnd(winSide, scoreLeft, scoreRight, mode, elapsed, maxRally);
+    // Notifier le guest
+    if (mode === 'online' && isHost) {
+      Online.sendEnd(winSide, scoreLeft, scoreRight);
+    }
   }
 
   /* ── Main loop ───────────────────────────────────── */
@@ -1928,7 +1974,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
       // Paddles
       var is2p = (mode === 'local2p');
-      Paddle.update(paddleLeft,  dt, canvas.height, canvas, is2p);
+      Paddle.update(paddleLeft,  dt, canvas.height, canvas, is2p, paddleSpeedFactor);
       if (mode === 'online') {
         // Sync remote paddle smoothly
         var targetY = remoteY * canvas.height - paddleRight.h / 2;
@@ -1983,6 +2029,7 @@ document.addEventListener('DOMContentLoaded', function() {
     comboCount = 0; maxRally = 0; currentRally = 0;
     survivalRound = 0; flashAlpha = 0; lastScorer = 1;
 
+    paddleSpeedFactor = parseFloat(document.getElementById('paddle-speed-slider').value) || 1.0;
     AI.setDifficulty(difficulty);
     resizeCanvas();
     createPaddles();
@@ -2064,6 +2111,14 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('btn-play').addEventListener('click', function() {
     Audio.init(); Audio.resume();
     startGame(selectedMode, selectedDiff);
+  });
+
+  var speedSlider = document.getElementById('paddle-speed-slider');
+  var speedLabel  = document.getElementById('paddle-speed-label');
+  speedSlider.addEventListener('input', function() {
+    var v = parseFloat(speedSlider.value);
+    var labels = { 0.5:'LENT', 0.75:'LENT+', 1.0:'NORMAL', 1.5:'RAPIDE', 2.0:'TRÈS RAPIDE' };
+    speedLabel.textContent = labels[v] || v + 'x';
   });
 
   document.getElementById('btn-sound').addEventListener('click', function() {
@@ -2188,6 +2243,15 @@ document.addEventListener('DOMContentLoaded', function() {
       if (msg.type === 'ballReady' && msg.t !== guestLastBallReady) {
         guestLastBallReady = msg.t;
         Ball.resetFirstRemote();
+      }
+      if (msg.type === 'end' && !isHost) {
+        gameRunning = false;
+        Audio.stopMusic();
+        // Inverser le côté gagnant (miroir)
+        var guestWinSide = msg.winSide === 'left' ? 'right' : 'left';
+        if (guestWinSide === 'left') Audio.victory(); else Audio.defeat();
+        // scoreLeft = guest, scoreRight = host (déjà miroir)
+        UI.showEnd(guestWinSide, scoreLeft, scoreRight, mode, elapsed, maxRally);
       }
     });
     startOnlineGame();
